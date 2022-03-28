@@ -115,6 +115,7 @@ struct metadata {
     bit<1> isOn;
     bit<1> isLong;
     bit<32> pointer; // 0-> .. -> MAX_WINDOW -> 0
+    bit<32> tmp_cbf;
     bit<32> decrease_flag0;
     bit<32> decrease_flag1;
     bit<32> decrease_flag2;
@@ -128,8 +129,9 @@ struct metadata {
     bit<32> window_h1_idx;
     bit<32> window_h2_idx;
     bit<32> active_flow;
-    bit<10> tmp;
-    bit<10> min_count;
+    bit<8> tmp;
+    bit<8> min_count;
+    bit<8> variable;
     // bit<16>  active_flow;
 }
 
@@ -224,13 +226,13 @@ control IngressP(
         void apply(inout bit<32> value, out bit<32> read_value) {
             if (value > 0){
                 value = value -1;
-                if (value == 0 ){
-                    meta.decrease_flag0 = 1;
-                }
             }
             read_value = value;
         }
     };
+    action counting_bloom_filter0_action_flow_action(){
+        meta.tmp_cbf = counting_bloom_filter0_action_flow.execute(meta.window_h0_idx);
+    }
     // 이후에 apply할때 counting_bloom_filter0_read_flow.execute(meta.window_h0_idx) 으로 실행하는 것.
 
     Hash<bit<32>> (HashAlgorithm_t.CRC32) hash_crc32;
@@ -244,7 +246,7 @@ control IngressP(
                                                   hdr.ipv4.srcAddr, 
                                                   hdr.ipv4.dstAddr, 
                                                   hdr.tcp.srcPort, 
-                                                  hdr.tcp.dstPort })[17:0];
+                                                  hdr.tcp.dstPort });
         meta.bf0 = counting_bloom_filter0_read_packet.execute(meta.bf0_idx);
     }
 
@@ -262,16 +264,16 @@ control IngressP(
         void apply(inout bit<32> value, out bit<32> read_value) {
             if (value > 0){
                 value = value -1;
-                if (value == 0 ){
-                    meta.decrease_flag0 = 1;
-                }
             }
             read_value = value;
         }
     };
+    action counting_bloom_filter1_action_flow_action(){
+        meta.tmp_cbf = counting_bloom_filter1_action_flow.execute(meta.window_h1_idx);
+    }
     // 이후에 apply할때 counting_bloom_filter1_read_flow.execute(meta.window_h1_idx) 으로 실행하는 것.
 
-    Hash<bit<16>> (HashAlgorithm_t.CRC16) hash_crc16;
+    Hash<bit<32>> (HashAlgorithm_t.CRC16) hash_crc16;
     RegisterAction<bit<32>, bit<32>, bit<32>>(couting_bloom_filter1) counting_bloom_filter1_read_packet = {
         void apply(inout bit<32> value, out bit<32> read_value) {
             read_value = value;
@@ -282,7 +284,7 @@ control IngressP(
                                                   hdr.ipv4.srcAddr, 
                                                   hdr.ipv4.dstAddr, 
                                                   hdr.tcp.srcPort, 
-                                                  hdr.tcp.dstPort })[17:0];
+                                                  hdr.tcp.dstPort });
         meta.bf1 = counting_bloom_filter1_read_packet.execute(meta.bf1_idx);
     }
 
@@ -300,13 +302,13 @@ control IngressP(
         void apply(inout bit<32> value, out bit<32> read_value) {
             if (value > 0){
                 value = value -1;
-                if (value == 0 ){
-                    meta.decrease_flag0 = 1;
-                }
             }
             read_value = value;
         }
     };
+    action counting_bloom_filter2_action_flow_action(){
+        meta.tmp_cbf = counting_bloom_filter2_action_flow.execute(meta.window_h2_idx);
+    }
     // 이후에 apply할때 counting_bloom_filter2_read_flow.execute(meta.window_h2_idx) 으로 실행하는 것.
 
     Hash<bit<32>> (HashAlgorithm_t.IDENTITY) hash_csum16;
@@ -320,7 +322,7 @@ control IngressP(
                                                   hdr.ipv4.srcAddr, 
                                                   hdr.ipv4.dstAddr, 
                                                   hdr.tcp.srcPort, 
-                                                  hdr.tcp.dstPort })[17:0];
+                                                  hdr.tcp.dstPort });
         meta.bf2 = counting_bloom_filter2_read_packet.execute(meta.bf2_idx);
     }
 
@@ -393,9 +395,6 @@ control IngressP(
         };
     action pointer_reg_update(){
         meta.pointer = pointer_reg_read.execute(0);
-        meta.window_h0_idx = window_reg_hash0_read_update.execute(meta.pointer);
-        meta.window_h1_idx = window_reg_hash1_read_update.execute(meta.pointer);
-        meta.window_h2_idx = window_reg_hash2_read_update.execute(meta.pointer);
     }
     
     
@@ -412,11 +411,11 @@ control IngressP(
     // bit<32> active_flow;
 
 
-    Register<bit<10>, bit<32>>(32w65536) hot_flow_counter0;
-    RegisterAction<bit<10>, bit<32>, bit<10>>(hot_flow_counter0) hot_flow_counter0_read = {
-        void apply(inout bit<32> value, out bit<32> read_value) {
-            read_value = value;
+    Register<bit<8>, bit<32>>(32w65536) hot_flow_counter0;
+    RegisterAction<bit<8>, bit<32>, bit<8>>(hot_flow_counter0) hot_flow_counter0_read = {
+        void apply(inout bit<8> value, out bit<8> read_value) {
             value = value + 1;
+            read_value = value;
         }
     };
     action hot_flow_action0(){
@@ -424,16 +423,17 @@ control IngressP(
                                                   hdr.ipv4.srcAddr, 
                                                   hdr.ipv4.dstAddr, 
                                                   hdr.tcp.srcPort, 
-                                                  hdr.tcp.dstPort })[17:0];
-        meta.tmp = hot_flow_counter0_read.execute(meta.bf0_idx);
-        meta.min_count = meta.tmp + 1;
+                                                  hdr.tcp.dstPort });
+        meta.min_count = hot_flow_counter0_read.execute(meta.bf0_idx);
+        // meta.tmp = hot_flow_counter0_read.execute(meta.bf0_idx);
+        // meta.min_count = meta.tmp + 1;
     }
     
-    Register<bit<10>, bit<32>>(32w65536) hot_flow_counter1;
-    RegisterAction<bit<10>, bit<32>, bit<10>>(hot_flow_counter1) hot_flow_counter1_read = {
-        void apply(inout bit<32> value, out bit<32> read_value) {
-            read_value = value;
+    Register<bit<8>, bit<32>>(32w65536) hot_flow_counter1;
+    RegisterAction<bit<8>, bit<32>, bit<8>>(hot_flow_counter1) hot_flow_counter1_read = {
+        void apply(inout bit<8> value, out bit<8> read_value) {
             value = value + 1;
+            read_value = value;
         }
     };
     action hot_flow_action1(){
@@ -441,18 +441,16 @@ control IngressP(
                                                   hdr.ipv4.srcAddr, 
                                                   hdr.ipv4.dstAddr, 
                                                   hdr.tcp.srcPort, 
-                                                  hdr.tcp.dstPort })[17:0];
+                                                  hdr.tcp.dstPort });
         meta.tmp = hot_flow_counter1_read.execute(meta.bf1_idx);
-        if (meta.min_count > meta.tmp + 1) {
-            meta.min_count = meta.tmp + 1;
-        }
+        // meta.tmp = meta.tmp + 1;
     }
     
-    Register<bit<10>, bit<32>>(32w65536) hot_flow_counter2;
-    RegisterAction<bit<10>, bit<32>, bit<10>>(hot_flow_counter2) hot_flow_counter2_read = {
-        void apply(inout bit<32> value, out bit<32> read_value) {
-            read_value = value;
+    Register<bit<8>, bit<32>>(32w65536) hot_flow_counter2;
+    RegisterAction<bit<8>, bit<32>, bit<8>>(hot_flow_counter2) hot_flow_counter2_read = {
+        void apply(inout bit<8> value, out bit<8> read_value) {
             value = value + 1;
+            read_value = value;
         }
     };
     action hot_flow_action2(){
@@ -460,11 +458,9 @@ control IngressP(
                                                   hdr.ipv4.srcAddr, 
                                                   hdr.ipv4.dstAddr, 
                                                   hdr.tcp.srcPort, 
-                                                  hdr.tcp.dstPort })[17:0];
+                                                  hdr.tcp.dstPort });
         meta.tmp = hot_flow_counter2_read.execute(meta.bf2_idx);
-        if (meta.min_count > meta.tmp + 1) {
-            meta.min_count = meta.tmp + 1;
-        }
+        // meta.tmp = meta.tmp + 1;
     }
     
     action long_short_update(){
@@ -502,6 +498,9 @@ control IngressP(
         }
 
     }
+action variable(){
+    meta.variable = meta.min_count - meta.tmp;
+}
 
 apply{
     // Read from Bloom Filter
@@ -520,27 +519,63 @@ apply{
         }
     }
     pointer_reg_update();
-    counting_bloom_filter0_action_flow.execute(meta.window_h0_idx);
-    counting_bloom_filter1_action_flow.execute(meta.window_h1_idx);
-    counting_bloom_filter2_action_flow.execute(meta.window_h2_idx);
+    meta.window_h0_idx = window_reg_hash0_read_update.execute(meta.pointer);
+    meta.window_h1_idx = window_reg_hash1_read_update.execute(meta.pointer);
+    meta.window_h2_idx = window_reg_hash2_read_update.execute(meta.pointer);
+    // counting_bloom_filter0_action_flow.execute(meta.window_h0_idx);
+    // counting_bloom_filter1_action_flow.execute(meta.window_h1_idx);
+    // counting_bloom_filter2_action_flow.execute(meta.window_h2_idx);
+    counting_bloom_filter0_action_flow_action();
+    if (meta.tmp_cbf == 0){
+        meta.decrease_flag0 = 1;
+    }
+    counting_bloom_filter1_action_flow_action();
+    if (meta.tmp_cbf == 0){
+        meta.decrease_flag1 = 1;
+    }
+    counting_bloom_filter2_action_flow_action();
+    if (meta.tmp_cbf == 0){
+        meta.decrease_flag2 = 1;
+    }
     if (meta.decrease_flag0 == 1 || meta.decrease_flag1 == 1 || meta.decrease_flag2 == 1) {
         num_active_flow_action_decrease.execute(0);
     }
+    bloom_filter0_action();
+    bloom_filter1_action();
+    bloom_filter2_action();
     if (meta.bf0 != 0 && meta.bf1 != 0 && meta.bf2 != 0 ){
-        bloom_filter0_action();
-        bloom_filter1_action();
-        bloom_filter2_action();
+        counting_bloom_filter0_write_packet.execute(meta.bf0);
+        counting_bloom_filter1_write_packet.execute(meta.bf1);
+        counting_bloom_filter2_write_packet.execute(meta.bf2);
     }
     else{
         num_active_flow_write_increase.execute(0);
-        bloom_filter0_action();
-        bloom_filter1_action();
-        bloom_filter2_action();
+        counting_bloom_filter0_write_packet.execute(meta.bf0);
+        counting_bloom_filter1_write_packet.execute(meta.bf1);
+        counting_bloom_filter2_write_packet.execute(meta.bf2);
     }
-    pointer_reg_update();
+    // pointer_reg_update();
     hot_flow_action0();
     hot_flow_action1();
+    variable();
+    if (meta.variable & 0x80 != 0x80) {
+        meta.min_count = meta.tmp;
+    }
+    // subtracting_table.apply();
+    // if (meta.min_count > meta.tmp) {
+    //     meta.min_count = meta.tmp;
+    // }
     hot_flow_action2();
+    variable();
+    if (meta.variable & 0x80 != 0x80) {
+        meta.min_count = meta.tmp;
+    }
+    if (meta.min_count >= LONG_THRESHOLD) {
+            meta.isLong = 1;
+        }
+        else{
+            meta.isLong = 0;
+        }
     select_priority_table.apply();
 } // apply
 }
